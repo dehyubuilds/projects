@@ -1,0 +1,103 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Sam Template for Image Processing
+
+Metadata:
+  AWS::ServerlessRepo::Application:
+    Name: AIImageProcessor
+    Description: "Processes images dropped into an S3 bucket via Rekognition. This app utilizes SQS as an event source for Lambda, therefore removing the need for Polling and reduces Queue management."
+    Author: Eric Johnson
+    SpdxLicenseId: MIT
+    LicenseUrl: LICENSE.txt
+    ReadmeUrl: README.md
+    Labels:
+      - s3
+      - sqs
+      - lambda
+      - rekognition
+      - ai
+      - node
+    HomePageUrl: https://github.com/singledigit/image-processor
+    SemanticVersion: 0.0.4
+    SourceCodeUrl: https://github.com/singledigit/image-processor/releases/tag/v0.0.4
+
+Globals:
+  Function:
+    Runtime: nodejs8.10
+    Timeout: 10
+
+Resources:
+  ProcessQueue:
+    Type: AWS::SQS::Queue
+
+  ProcessInBucket:
+    Type: AWS::S3::Bucket
+    DependsOn:
+      - ProcessQueue
+      - ProcessQueuePolicy
+    Properties:
+      NotificationConfiguration:
+        QueueConfigurations:
+        - Event: s3:ObjectCreated:*
+          Queue: !GetAtt ProcessQueue.Arn
+
+  # Process Queues to be GA 11/15/2018
+  ProcessQueuePolicy: 
+    Type: AWS::SQS::QueuePolicy
+    DependsOn:
+      - ProcessQueue
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Action:
+          - sqs:SendMessage
+          Effect: Allow
+          Resource: !GetAtt ProcessQueue.Arn
+          Condition:
+            ArnLike:
+              aws:SourceArn: !Sub 'arn:aws:s3:::${AWS::StackName}-*'
+          Principal: "*"
+      Queues:
+      - !Ref ProcessQueue
+
+  ProcessFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ResultsTable
+        - S3ReadPolicy:
+            BucketName: !Ref ProcessInBucket
+        - RekognitionDetectOnlyPolicy: {}
+      CodeUri: process-service/
+      Handler: app.lambdaHandler
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ResultsTable
+      Events:
+        Process:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ProcessQueue.Arn
+            BatchSize: 10
+  
+  ResultsTable:
+    Type: AWS::Serverless::SimpleTable
+
+# Outputs:
+
+#     UploaderApi:
+#         Description: "API Gateway endpoint URL for Prod stage for Uploader function"
+#         Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/upload/"
+
+#     UploaderFunction:
+#         Description: "Uploader Lambda Function ARN"
+#         Value: !GetAtt UploaderFunction.Arn
+
+#     UploaderFunctionIamRole:
+#         Description: "Implicit IAM Role created for Uploader function"
+#         Value: !GetAtt UploaderFunctionRole.Arn
+
+    
+    
